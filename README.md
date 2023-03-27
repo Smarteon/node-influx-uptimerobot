@@ -70,6 +70,7 @@ The `logs` table contains any messages that are logged by Uptime Robot for a mon
 - **reason** The reason of the downtime (if exists).
 - **reason_detail** Additional information about the reason (if exists).
 - **type** Type of log (1 - down, 2 - up, 99 - paused, 98 - started)
+- **logDatetime** Datetime of the log.
 
 ### Response Time
 The `response_time` table will contain entries of the response times for each monitor.

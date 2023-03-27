@@ -142,10 +142,11 @@ function processMonitors(monitors) {
                 new Influx.Point()
                     .measurement('logs')
                     .tag('monitorName', monitor.friendly_name)
+                    .intField('logDatetime', timestamp.valueOf())
                     .stringField('type', log.type)
                     .stringField('reason', (log.reason.code === undefined || log.reason.code == null) ? "" : "" + log.reason.code)
                     .stringField('reason_detail', (log.reason.detail === undefined || log.reason.detail == null) ? "" : log.reason.detail)
-                    .timestamp(timestamp.valueOf())
+                    .timestamp(Date.now())
             );
         });
 
