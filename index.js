@@ -79,6 +79,7 @@ function getMonitors() {
         const postData = {
             response_times: "1",
             response_times_limit: config.uptimerobot.response_times_limit,
+            response_times_average: "5",
             timezone: "1",
             format: "json",
             logs: "1",
