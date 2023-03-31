@@ -1,5 +1,5 @@
 'use strict';
-const Influx = require('influx');
+const Influx = require('@influxdata/influxdb-client');
 const http = require('https');
 const moment = require('moment');
 const fs = require('fs');
@@ -14,15 +14,14 @@ if (process.argv.length > 2) {
 }
 
 // Read the config file if it exists
-if(fs.existsSync(configFile)){
+if (fs.existsSync(configFile)) {
     console.log("Loading config file: " + configFile);
     config = require(configFile);
-    if(config.uptimerobot && config.uptimerobot.apiKey !== undefined){
+    if (config.uptimerobot && config.uptimerobot.apiKey !== undefined) {
         console.warn("uptimerobot.apiKey is deprecated, use uptimerobot.api_key instead");
         config.uptimerobot.api_key = config.uptimerobot.apiKey;
     }
-}
-else{
+} else {
     console.log("Config file not found, depending on environment variables");
 }
 
@@ -31,38 +30,34 @@ else{
 config.application = config.application || {};
 config.uptimerobot = config.uptimerobot || {};
 config.influx = config.influx || {};
-if(process.env.APPLICATION_INTERVAL !== undefined) {
+if (process.env.APPLICATION_INTERVAL !== undefined) {
     config.application.interval = process.env.APPLICATION_INTERVAL;
 }
-if(process.env.UPTIMEROBOT_API_KEY !== undefined) {
+if (process.env.UPTIMEROBOT_API_KEY !== undefined) {
     config.uptimerobot.api_key = process.env.UPTIMEROBOT_API_KEY;
 }
-if(process.env.UPTIMEROBOT_LOGS_LIMIT !== undefined) {
+if (process.env.UPTIMEROBOT_LOGS_LIMIT !== undefined) {
     config.uptimerobot.logs_limit = process.env.UPTIMEROBOT_LOGS_LIMIT;
 }
-if(process.env.UPTIMEROBOT_RESPONSE_TIMES_LIMIT !== undefined) {
+if (process.env.UPTIMEROBOT_RESPONSE_TIMES_LIMIT !== undefined) {
     config.uptimerobot.response_times_limit = process.env.UPTIMEROBOT_RESPONSE_TIMES_LIMIT;
 }
-if(process.env.INFLUX_HOST !== undefined) {
-    config.influx.host = process.env.INFLUX_HOST;
+if (process.env.INFLUX_URL !== undefined) {
+    config.influx.url = process.env.INFLUX_URL;
 }
-if(process.env.INFLUX_PORT !== undefined) {
-    config.influx.port = process.env.INFLUX_PORT;
+if (process.env.INFLUX_ORG !== undefined) {
+    config.influx.org = process.env.INFLUX_ORG;
 }
-if(process.env.INFLUX_PROTOCOL !== undefined) {
-    config.influx.protocol = process.env.INFLUX_PROTOCOL;
+if (process.env.INFLUX_TOKEN !== undefined) {
+    config.influx.token = process.env.INFLUX_TOKEN;
 }
-if(process.env.INFLUX_USERNAME !== undefined) {
-    config.influx.username = process.env.INFLUX_USERNAME;
-}
-if(process.env.INFLUX_PASSWORD !== undefined) {
-    config.influx.password = process.env.INFLUX_PASSWORD;
-}
-if(process.env.INFLUX_DATABASE !== undefined) {
-    config.influx.database = process.env.INFLUX_DATABASE;
+if (process.env.INFLUX_BUCKET !== undefined) {
+    config.influx.bucket = process.env.INFLUX_BUCKET;
 }
 
-const influxdb = new Influx.InfluxDB(config.influx);
+const url = config.influx.url
+const token = config.influx.token
+const influxdb = new Influx.InfluxDB({url, token}).getWriteApi(config.influx.org, config.influx.bucket, 'ms');
 
 
 /**
@@ -70,7 +65,7 @@ const influxdb = new Influx.InfluxDB(config.influx);
  * @returns {Promise<any>}
  */
 function getMonitors() {
-    return new Promise((resolve, reject)=>{
+    return new Promise((resolve, reject) => {
         const options = {
             hostname: 'api.uptimerobot.com',
             port: 443,
@@ -108,8 +103,9 @@ function getMonitors() {
 
 }
 
-function processMonitors(monitors){
-    if(monitors === undefined){
+function processMonitors(monitors) {
+    console.log("Sending data to Influx")
+    if (monitors === undefined) {
         console.warn("Could not find any monitors");
         return;
     }
@@ -121,23 +117,18 @@ function processMonitors(monitors){
          ********************************************************************/
         const responseTimes = monitor.response_times;
         const responseTimePoints = [];
-        responseTimes.forEach(function(rt) {
+        responseTimes.forEach(function (rt) {
             const timestamp = moment.unix(rt.datetime);
-            responseTimePoints.push({
-                measurement : 'response_times',
-                timestamp : timestamp.valueOf(),
-                tags : {
-                    id : monitor.id,
-                    friendlyname : monitor.friendly_name
-                },
-                fields: {
-                    value : rt.value
-                },
-            });
+            responseTimePoints.push(
+                new Influx.Point()
+                    .measurement('response_times')
+                    .tag('monitorName', monitor.friendly_name)
+                    .floatField('value', rt.value)
+                    .timestamp(timestamp.valueOf())
+            );
         });
 
-        influxdb.writePoints(responseTimePoints, { precision: 'ms' })
-            .then(() => {}, error => console.warn(error));
+        influxdb.writePoints(responseTimePoints)
 
         /*********************************************************************
          *  Monitor logs
@@ -147,23 +138,19 @@ function processMonitors(monitors){
 
         logs.forEach((log) => {
             const timestamp = moment.unix(log.datetime);
-            logTimePoints.push({
-                measurement : "logs",
-                timestamp : timestamp.valueOf(),
-                tags : {
-                    id : monitor.id,
-                    friendlyname : monitor.friendly_name
-                },
-                fields : {
-                    type : log.type,
-                    reason : (log.reason.code === undefined || log.reason.code == null) ? "" : "" + log.reason.code,
-                    reason_detail : (log.reason.detail === undefined || log.reason.detail == null) ? "" : log.reason.detail
-                }
-            });
+            logTimePoints.push(
+                new Influx.Point()
+                    .measurement('logs')
+                    .tag('monitorName', monitor.friendly_name)
+                    .intField('logDatetime', timestamp.valueOf())
+                    .stringField('type', log.type)
+                    .stringField('reason', (log.reason.code === undefined || log.reason.code == null) ? "" : "" + log.reason.code)
+                    .stringField('reason_detail', (log.reason.detail === undefined || log.reason.detail == null) ? "" : log.reason.detail)
+                    .timestamp(Date.now())
+            );
         });
 
-        influxdb.writePoints(logTimePoints, { precision: 'ms' })
-            .then(() => {}, error => console.warn(error));
+        influxdb.writePoints(logTimePoints)
     });
 }
 
@@ -171,10 +158,11 @@ getMonitors()
     .then(processMonitors);
 
 // If there is an interval configured, keep running at the interval
-if(config.application.interval !== undefined && config.application.interval > 0){
+if (config.application.interval !== undefined && config.application.interval > 0) {
     setInterval(() => {
         getMonitors()
             .then(processMonitors);
+        console.log("Waiting for " + config.application.interval + " seconds");
     }, config.application.interval * 1000);
 
 }
